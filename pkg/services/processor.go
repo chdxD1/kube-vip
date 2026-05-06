@@ -169,7 +169,9 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 					!reflect.DeepEqual(svc.Spec.IPFamilies, i.ServiceSnapshot.Spec.IPFamilies) ||
 					*svc.Spec.IPFamilyPolicy != *i.ServiceSnapshot.Spec.IPFamilyPolicy ||
 					// DDNS was disabled/enabled
-					svc.Annotations[kubevip.ServiceDDNS] != i.ServiceSnapshot.Annotations[kubevip.ServiceDDNS]
+					svc.Annotations[kubevip.ServiceDDNS] != i.ServiceSnapshot.Annotations[kubevip.ServiceDDNS] ||
+					// Egress annotation changed (requires election re-evaluation)
+					svc.Annotations[kubevip.Egress] != i.ServiceSnapshot.Annotations[kubevip.Egress]
 
 		}
 		if shouldGarbageCollect {
@@ -255,9 +257,9 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 			})
 
 			svcCtx.IsWatched = true
-		} else if p.config.EnableServicesElection || // Service Election
+		} else if kubevip.NeedsServiceElection(p.config, svc.Annotations) || // Service Election (global or per-service for egress)
 			((p.config.EnableRoutingTable || p.config.EnableBGP) && // Routing table mode or BGP
-				(!p.config.EnableLeaderElection && !p.config.EnableServicesElection)) { // No leaderelection or services election
+				!kubevip.IsElectionEnabled(p.config, svc.Annotations)) { // No election at all
 
 			// If this load balancer Traffic Policy is "local"
 			if svc.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal {
@@ -265,7 +267,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				// Start an endpoint watcher if we're not watching it already
 				if !svcCtx.IsWatched {
 					// background the endpoint watcher
-					if (p.config.EnableRoutingTable || p.config.EnableBGP) && (!p.config.EnableLeaderElection && !p.config.EnableServicesElection) {
+					if (p.config.EnableRoutingTable || p.config.EnableBGP) && !kubevip.IsElectionEnabled(p.config, svc.Annotations) {
 						err = serviceFunc(svcCtx, svc, wg)
 						if err != nil {
 							log.Error(err.Error())
@@ -299,7 +301,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 					// We're now watching this service
 					svcCtx.IsWatched = true
 				}
-			} else if (p.config.EnableBGP || p.config.EnableRoutingTable) && (!p.config.EnableLeaderElection && !p.config.EnableServicesElection) {
+			} else if (p.config.EnableBGP || p.config.EnableRoutingTable) && !kubevip.IsElectionEnabled(p.config, svc.Annotations) {
 				err = serviceFunc(svcCtx, svc, wg)
 				if err != nil {
 					log.Error(err.Error())
@@ -363,7 +365,7 @@ func (p *Processor) AddOrModify(ctx context.Context, event watch.Event, serviceF
 				}
 			}
 		}
-		if !p.config.EnableServicesElection {
+		if !kubevip.NeedsServiceElection(p.config, svc.Annotations) {
 			log.Debug("Service now active", "name", svc.Name, "uid", svc.UID)
 			svcCtx.IsActive = true
 		}
@@ -396,14 +398,14 @@ func (p *Processor) Delete(event watch.Event) error {
 		}
 
 		// If no leader election is enabled, delete routes here
-		if !p.config.EnableLeaderElection && !p.config.EnableServicesElection &&
+		if !kubevip.IsElectionEnabled(p.config, svc.Annotations) &&
 			p.config.EnableRoutingTable && svcCtx.HasConfiguredNetworks() {
 			if errs := endpoints.ClearRoutes(svc, &p.ServiceInstances, p.routeMgr); len(errs) == 0 {
 				svcCtx.ConfiguredNetworks.Clear()
 			}
 		}
 
-		if svcCtx.IsActive && !p.config.EnableServicesElection {
+		if svcCtx.IsActive && !kubevip.NeedsServiceElection(p.config, svc.Annotations) {
 			// If this is an active service then and additional leaderElection will handle stopping
 			err = p.deleteService(svcCtx.Ctx, svc.UID)
 			if err != nil {
