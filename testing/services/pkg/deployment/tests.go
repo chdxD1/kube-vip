@@ -36,6 +36,7 @@ type TestConfig struct {
 	LocalDeploy        bool
 	DualStack          bool
 	Egress             bool
+	EgressAutoElection bool
 	EgressInternal     bool
 	EgressIPv6         bool
 	RetainCluster      bool
@@ -460,6 +461,91 @@ func (config *TestConfig) EgressDeployment(ctx context.Context, clientset *kuber
 		config.SuccessCounter++
 	} else {
 		return fmt.Errorf("😱 No traffic found from loadbalancer address ")
+	}
+
+	return nil
+}
+
+// EgressAutoElectionDeployment tests egress without the global svc_election flag.
+// It verifies that egress services automatically trigger per-service leader
+// election via the NeedsServiceElection helper.
+func (config *TestConfig) EgressAutoElectionDeployment(ctx context.Context, clientset *kubernetes.Clientset) error {
+	var err error
+	defer func() error {
+		tempDirPath, err := os.MkdirTemp(config.TempDirPath, "egress-auto-election")
+		if err != nil {
+			slog.Fatal(err)
+		}
+
+		slog.Infof("saving logs to %q", tempDirPath)
+		if err = e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
+			slog.Infof("🧪 ---> egress auto-election logs err <---: %s", err.Error())
+			return err
+		}
+
+		slog.Infof("🧹 deleting Service [%s], deployment [%s]", config.ServiceName, config.DeploymentName)
+		err = clientset.CoreV1().Services(v1.NamespaceDefault).Delete(ctx, config.ServiceName, metav1.DeleteOptions{})
+		if err != nil {
+			slog.Fatal(err)
+		}
+
+		if err = deleteDeployment(ctx, clientset, config.DeploymentName); err != nil {
+			slog.Fatal(err)
+		}
+		return nil
+	}() //nolint
+
+	slog.Infof("🧪 ---> egress auto-election (no svc_election flag) <---")
+	var egress string
+	var found bool
+	timeout := 30
+
+	deploy := Deployment{
+		name:         config.DeploymentName,
+		nodeAffinity: config.Affinity,
+		replicas:     1,
+		client:       true,
+	}
+
+	addr, _, err := GetLocalIPv4(config.DockerNIC)
+	if err != nil {
+		return fmt.Errorf("unable to detect local IP address: %w", err)
+	}
+	deploy.address = addr.String()
+	if deploy.address == "" {
+		return fmt.Errorf("unable to detect local IP address")
+	}
+	slog.Infof("📠 found local address [%s]", deploy.address)
+	err = deploy.CreateDeployment(ctx, clientset)
+	if err != nil {
+		return err
+	}
+
+	svc := Service{
+		policyLocal: true,
+		name:        config.ServiceName,
+		egress:      true,
+		testHTTP:    false,
+		timeout:     30,
+	}
+
+	_, lbAddresses, err := svc.CreateService(ctx, clientset)
+	if err != nil {
+		return err
+	}
+	if len(lbAddresses) < 1 {
+		return fmt.Errorf("no loadbalancer address found")
+	}
+
+	egress = lbAddresses[0]
+
+	found = tcpServer(&egress, timeout, "tcp4")
+
+	if found {
+		slog.Infof("🕵️  egress auto-election has correct IP address")
+		config.SuccessCounter++
+	} else {
+		return fmt.Errorf("😱 No traffic found from loadbalancer address (auto-election)")
 	}
 
 	return nil

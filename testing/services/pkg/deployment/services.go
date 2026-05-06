@@ -207,6 +207,24 @@ func (config *TestConfig) StartServiceTest(ctx context.Context, clientset *kuber
 		}
 	}
 
+	if config.EgressAutoElection {
+		// Egress auto-election test (no svc_election flag)
+		err = config.EgressAutoElectionDeployment(ctx, clientset)
+		if err != nil {
+			slog.Error(err)
+			errs = append(errs, err)
+		}
+		tempDirPath, err := os.MkdirTemp(globalTempDirPath, "EgressAutoElection")
+		if err != nil {
+			slog.Error(err)
+			return []error{fmt.Errorf("failed to create temporary directory: %w", err)}
+		}
+		slog.Infof("saving logs to %q", tempDirPath)
+		if err := e2e.GetLogs(ctx, clientset, tempDirPath, "services"); err != nil {
+			slog.Error(err)
+		}
+	}
+
 	if config.DualStack {
 		// Dualstack tests
 		err = config.DualStackDeployment(ctx, clientset)

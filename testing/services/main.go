@@ -38,6 +38,7 @@ func main() {
 	flag.BoolVar(&t.LeaderActive, "leaderActive", false, "Perform a test on the active leader")
 	flag.BoolVar(&t.LocalDeploy, "localDeploy", false, "Perform a test on the active leader")
 	flag.BoolVar(&t.Egress, "egress", false, "Perform an egress test")
+	flag.BoolVar(&t.EgressAutoElection, "egressAutoElection", false, "Perform an egress test without svc_election (tests auto-election)")
 	flag.BoolVar(&t.EgressInternal, "egressInternal", false, "Perform an egress test, using the internal functionality")
 	flag.BoolVar(&t.EgressIPv6, "egressIPv6", false, "Perform an egress test")
 	flag.BoolVar(&t.DualStack, "dualStack", false, "Perform an dual stack test")
@@ -132,9 +133,14 @@ func main() {
 		slog.Debugf("Using external Kubernetes configuration from file [%s]", homeConfigPath)
 
 		if !existing {
-			// Deplopy the daemonset for kube-vip
+			// Deploy the daemonset for kube-vip
 			deploy := deployment.Deployment{}
-			err = deploy.CreateKVDs(ctx, clientset, t.ImagePath)
+			if t.EgressAutoElection && !t.Egress {
+				// Deploy without svc_election to test auto-election for egress
+				err = deploy.CreateKVDsNoSvcElection(ctx, clientset, t.ImagePath)
+			} else {
+				err = deploy.CreateKVDs(ctx, clientset, t.ImagePath)
+			}
 			if err != nil {
 				slog.Error(err)
 			}

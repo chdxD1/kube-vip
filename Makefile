@@ -152,6 +152,10 @@ service-tests:
 	$(MAKE) -C testing/e2e/e2e dockerLocal
 	E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run ./testing/services -Services -simple -deployments -leaderActive -leaderFailover -localDeploy -egress -egressIPv6 -dualStack
 
+service-tests-egress-auto-election:
+	$(MAKE) -C testing/e2e/e2e dockerLocal
+	E2E_IMAGE_PATH=$(REPOSITORY)/$(TARGET):$(DOCKERTAG) go run ./testing/services -Services -egressAutoElection
+
 trivy: dockerx86ActionIPTables
 	docker run -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.47.0 \
 		image  \

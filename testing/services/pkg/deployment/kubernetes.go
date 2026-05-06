@@ -137,6 +137,106 @@ func (d *Deployment) CreateKVDs(ctx context.Context, clientset *kubernetes.Clien
 	return nil
 
 }
+
+// CreateKVDsNoSvcElection creates a kube-vip DaemonSet without the svc_election
+// env var. This is used to test that egress services automatically enable
+// per-service leader election via the NeedsServiceElection helper.
+func (d *Deployment) CreateKVDsNoSvcElection(ctx context.Context, clientset *kubernetes.Clientset, imagepath string) error {
+	ds := appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "kube-vip-ds",
+			Namespace: "kube-system",
+			Labels: map[string]string{
+				"app.kubernetes.io/name": "kube-vip-ds",
+				"app":                    "kube-vip",
+			},
+		},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"app.kubernetes.io/name": "kube-vip-ds",
+					"app":                    "kube-vip",
+				},
+			},
+			Template: v1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"app.kubernetes.io/name": "kube-vip-ds",
+						"app":                    "kube-vip",
+					},
+				},
+				Spec: v1.PodSpec{
+					ServiceAccountName: "kube-vip",
+					HostNetwork:        true,
+					Containers: []v1.Container{
+						{
+							Args: []string{
+								"manager",
+							},
+							Env: []v1.EnvVar{
+								{
+									Name:  "vip_arp",
+									Value: "true",
+								},
+								{
+									Name:  "vip_subnet",
+									Value: "auto,auto",
+								},
+								{
+									Name:  "svc_enable",
+									Value: "true",
+								},
+								{
+									Name:  "enable_endpointslices",
+									Value: "true",
+								},
+								// svc_election intentionally omitted to test auto-election for egress
+								{
+									Name:  "EGRESS_CLEAN",
+									Value: "true",
+								},
+								{
+									Name:  "vip_loglevel",
+									Value: "-4",
+								},
+								{
+									Name:  "egress_withnftables",
+									Value: "true",
+								},
+								{
+									Name: "vip_nodename",
+									ValueFrom: &v1.EnvVarSource{
+										FieldRef: &v1.ObjectFieldSelector{
+											FieldPath: "spec.nodeName",
+										},
+									},
+								},
+							},
+							Image: imagepath,
+							Name:  "kube-vip",
+							SecurityContext: &v1.SecurityContext{
+								Capabilities: &v1.Capabilities{
+									Add: []v1.Capability{
+										"NET_ADMIN",
+										"NET_RAW",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := clientset.AppsV1().DaemonSets("kube-system").Create(ctx, &ds, metav1.CreateOptions{})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (d *Deployment) CreateDeployment(ctx context.Context, clientset *kubernetes.Clientset) error {
 	replicas := d.replicas
 	deployment := &appsv1.Deployment{
