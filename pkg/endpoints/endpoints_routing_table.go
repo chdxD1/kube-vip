@@ -9,6 +9,7 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/egress"
 	"github.com/kube-vip/kube-vip/pkg/instance"
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/route"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
@@ -50,7 +51,7 @@ func (rt *RoutingTable) processInstance(ctx *servicecontext.Context, service *v1
 }
 
 func (rt *RoutingTable) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service) {
-	if !rt.config.EnableServicesElection && !rt.config.EnableLeaderElection {
+	if !kubevip.IsElectionEnabled(rt.config, service.Annotations) {
 		if errs := ClearRoutes(service, rt.instances, rt.routeMgr); len(errs) == 0 {
 			svcCtx.ConfiguredNetworks.Clear()
 		} else {
@@ -80,8 +81,7 @@ func (rt *RoutingTable) removeEgress(service *v1.Service, lastKnownGoodEndpoint 
 
 func (rt *RoutingTable) delete(_ context.Context, service *v1.Service, id string) error {
 	// When no-leader-elecition mode
-	if !rt.config.EnableServicesElection && !rt.config.EnableLeaderElection {
-		// find all existing local endpoints
+	if !kubevip.IsElectionEnabled(rt.config, service.Annotations) {
 		endpoints, err := rt.getEndpoints(service, id)
 		if err != nil {
 			return fmt.Errorf("[%s] error getting endpoints: %w", rt.provider.GetLabel(), err)

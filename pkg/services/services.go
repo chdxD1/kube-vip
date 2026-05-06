@@ -395,7 +395,7 @@ func (p *Processor) deleteService(ctx context.Context, uid types.UID) error {
 		endpoints.ClearBGPHostsByInstance(ctx, serviceInstance, p.bgpServer)
 	}
 
-	if p.config.EnableRoutingTable && (p.config.EnableLeaderElection || p.config.EnableServicesElection) {
+	if p.config.EnableRoutingTable && kubevip.IsElectionEnabled(p.config, serviceInstance.ServiceSnapshot.Annotations) {
 		if errs := endpoints.ClearRoutesByInstance(serviceInstance.ServiceSnapshot, serviceInstance, &p.ServiceInstances, p.routeMgr); len(errs) > 0 {
 			for _, err := range errs {
 				log.Error("unable to clear routes", "err", err)

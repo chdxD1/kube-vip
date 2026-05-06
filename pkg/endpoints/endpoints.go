@@ -77,7 +77,7 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 		p.updateLastKnownGoodEndpoint(svcCtx, lastKnownGoodEndpoint, endpoints, service)
 		svcCtx.HasEndpoints.Store(true)
 		// start leader election if it's enabled and not already started
-		if !svcCtx.IsActive && p.config.EnableServicesElection {
+		if !svcCtx.IsActive && kubevip.NeedsServiceElection(p.config, service.Annotations) {
 			wg.Go(func() {
 				startLeaderElection(svcCtx, service, serviceFunc, wg)
 			})
@@ -87,7 +87,7 @@ func (p *Processor) AddOrModify(svcCtx *servicecontext.Context, event watch.Even
 		// Process immediately if:
 		// - No services/leader election is enabled, OR
 		// - WireGuard is enabled (it always needs immediate DNAT rule updates)
-		if (!p.config.EnableServicesElection && !p.config.EnableLeaderElection) || p.config.EnableWireguard {
+		if !kubevip.IsElectionEnabled(p.config, service.Annotations) || p.config.EnableWireguard {
 			if err := p.worker.processInstance(svcCtx, service); err != nil {
 				return false, fmt.Errorf("failed to process non-empty instance: %w", err)
 			}
@@ -139,7 +139,7 @@ func (p *Processor) updateLastKnownGoodEndpoint(svcCtx *servicecontext.Context, 
 	// If the last endpoint no longer exists, we cancel our leader Election, and set another endpoint as last known good
 	if !stillExists {
 		p.worker.removeEgress(service, lastKnownGoodEndpoint)
-		if svcCtx.IsActive && (p.config.EnableServicesElection || p.config.EnableLeaderElection) {
+		if svcCtx.IsActive && kubevip.IsElectionEnabled(p.config, service.Annotations) {
 			log.Warn("existing endpoint has been removed, restarting leaderElection", "provider", p.provider.GetLabel(), "endpoint", *lastKnownGoodEndpoint)
 			// Stop the existing leaderElection
 			if svcCtx.Lease != nil {

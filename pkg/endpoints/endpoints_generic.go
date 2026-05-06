@@ -100,7 +100,7 @@ func (g *generic) getAllEndpoints(service *v1.Service, id string) ([]string, err
 	// Build endpoints
 	var err error
 	var endpoints []string
-	if !g.config.EnableLeaderElection && !g.config.EnableServicesElection &&
+	if !kubevip.IsElectionEnabled(g.config, service.Annotations) &&
 		service.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeCluster {
 		if endpoints, err = g.provider.GetAllEndpoints(); err != nil {
 			return nil, fmt.Errorf("[%s] error getting all endpoints: %w", g.provider.GetLabel(), err)

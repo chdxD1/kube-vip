@@ -7,6 +7,7 @@ import (
 
 	"github.com/kube-vip/kube-vip/pkg/bgp"
 	"github.com/kube-vip/kube-vip/pkg/instance"
+	"github.com/kube-vip/kube-vip/pkg/kubevip"
 	"github.com/kube-vip/kube-vip/pkg/lease"
 	"github.com/kube-vip/kube-vip/pkg/servicecontext"
 	v1 "k8s.io/api/core/v1"
@@ -46,8 +47,7 @@ func (b *BGP) processInstance(svcCtx *servicecontext.Context, service *v1.Servic
 }
 
 func (b *BGP) clear(svcCtx *servicecontext.Context, lastKnownGoodEndpoint *string, service *v1.Service) {
-	if !b.config.EnableServicesElection && !b.config.EnableLeaderElection {
-		// If BGP mode is enabled - routes should be deleted
+	if !kubevip.IsElectionEnabled(b.config, service.Annotations) {
 		if instance := instance.FindServiceInstance(service, *b.instances); instance != nil {
 			for _, cluster := range instance.Clusters {
 				for i := range cluster.Network {
@@ -78,8 +78,7 @@ func (b *BGP) getEndpoints(service *v1.Service, id string) ([]string, error) {
 
 func (b *BGP) delete(ctx context.Context, service *v1.Service, id string) error {
 	// When no-leader-elecition mode
-	if !b.config.EnableServicesElection && !b.config.EnableLeaderElection {
-		// find all existing local endpoints
+	if !kubevip.IsElectionEnabled(b.config, service.Annotations) {
 		endpoints, err := b.getEndpoints(service, id)
 		if err != nil {
 			return fmt.Errorf("[%s] error getting endpoints: %w", b.provider.GetLabel(), err)
